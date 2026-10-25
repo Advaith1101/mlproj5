@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>South India Open Data Integration Engine</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Plotly CDN for Charts -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        code, pre, .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .tab-btn.active {
+            background-color: #1e293b;
+            color: #38bdf8;
+            border-bottom: 2px solid #38bdf8;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col antialiased">
+
+    <!-- PERMANENT REAL DATA BANNER (Strict Rule D1, D4) -->
+    <header class="bg-emerald-950/90 border-b border-emerald-500/40 px-6 py-2.5 flex flex-wrap items-center justify-between text-xs font-mono text-emerald-300 tracking-wide sticky top-0 z-50 backdrop-blur">
+        <div class="flex items-center space-x-2">
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span class="font-bold text-emerald-200">REAL DATA</span>
+            <span>—</span>
+            <span>https://data.gov.in/ (Official Open Government Data)</span>
+        </div>
+        <div class="flex items-center space-x-4 text-emerald-400/90 text-[11px]">
+            <span>Scope: TN, KA, KL, AP, TG, PY</span>
+            <span>•</span>
+            <span id="header-timestamp">Loaded & Verified DuckDB Mart</span>
+        </div>
+    </header>
+
+    <!-- App Title & Navigation Bar -->
+    <nav class="bg-slate-900 border-b border-slate-800 px-6 py-3 flex flex-wrap items-center justify-between">
+        <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20 text-sm">
+                SI
+            </div>
+            <div>
+                <h1 class="text-sm font-bold text-white tracking-tight">South India Open Data Integration Engine</h1>
+                <p class="text-[11px] text-slate-400">Integrated M.Sc. Theoretical Computer Science • Viva Defense System</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-2 mt-2 sm:mt-0 text-xs">
+            <span class="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800">DuckDB 1.0</span>
+            <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">Zero Synthetic Data</span>
+        </div>
+    </nav>
+
+    <!-- Tab Bar: 7 Screens Architecture -->
+    <div class="bg-slate-900/80 border-b border-slate-800 px-6 flex space-x-1 overflow-x-auto text-xs font-medium">
+        <button onclick="switchTab('screen-overview')" id="tab-screen-overview" class="tab-btn active px-4 py-3 text-slate-300 hover:text-white transition">1. Overview</button>
+        <button onclick="switchTab('screen-cleaning')" id="tab-screen-cleaning" class="tab-btn px-4 py-3 text-slate-300 hover:text-white transition">2. Sources & Cleaning</button>
+        <button onclick="switchTab('screen-integration')" id="tab-screen-integration" class="tab-btn px-4 py-3 text-slate-300 hover:text-white transition">3. Dataset Integration & Graph</button>
+        <button onclick="switchTab('screen-resolver')" id="tab-screen-resolver" class="tab-btn px-4 py-3 text-slate-300 hover:text-white transition">4. Entity Matching & Review Queue</button>
+        <button onclick="switchTab('screen-ev')" id="tab-screen-ev" class="tab-btn px-4 py-3 text-slate-300 hover:text-white transition">5. EV Coverage Explorer</button>
+        <button onclick="switchTab('screen-reports')" id="tab-screen-reports" class="tab-btn px-4 py-3 text-slate-300 hover:text-white transition">6. Reports & Release</button>
+        <button onclick="switchTab('screen-eval')" id="tab-screen-eval" class="tab-btn px-4 py-3 text-slate-300 hover:text-white transition">7. Model Evaluation</button>
+    </div>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-6 py-6">
+
+        <!-- ============================================================== -->
+        <!-- SCREEN 1: OVERVIEW -->
+        <!-- ============================================================== -->
+        <section id="screen-overview" class="screen-view space-y-6">
+            <!-- Top Metric Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
+                    <div class="text-xs font-medium text-slate-400 uppercase tracking-wider">Clean Pincodes</div>
+                    <div class="text-3xl font-bold text-white mt-1" id="stat-pincode">43,477</div>
+                    <div class="text-xs text-slate-500 mt-1">6 States (Dept of Posts)</div>
+                    <div class="text-[10px] text-emerald-400 mt-2 font-mono">32,218 non-South rows excluded</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
+                    <div class="text-xs font-medium text-slate-400 uppercase tracking-wider">MGNREGA Snapshots</div>
+                    <div class="text-3xl font-bold text-white mt-1" id="stat-mgnrega">12,193</div>
+                    <div class="text-xs text-slate-500 mt-1">Deduplicated panel (2018–2026)</div>
+                    <div class="text-[10px] text-indigo-400 mt-2 font-mono">69,816 duplicate revisions filtered</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
+                    <div class="text-xs font-medium text-slate-400 uppercase tracking-wider">MSME Districts</div>
+                    <div class="text-3xl font-bold text-white mt-1" id="stat-msme">125</div>
+                    <div class="text-xs text-slate-500 mt-1">Udyam Registration records</div>
+                    <div class="text-[10px] text-amber-400 mt-2 font-mono">582 non-South rows excluded</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
+                    <div class="text-xs font-medium text-slate-400 uppercase tracking-wider">EV State Tables</div>
+                    <div class="text-3xl font-bold text-white mt-1" id="stat-ev">104 records</div>
+                    <div class="text-xs text-slate-500 mt-1">PCS 2024, OMC 2025, Vahan 2023</div>
+                    <div class="text-[10px] text-emerald-400 mt-2 font-mono">Summary rows reconciled</div>
+                </div>
+            </div>
+
+            <!-- Architecture Flow Banner -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+                <h2 class="text-sm font-semibold text-white">System Architecture & Pipeline Flow</h2>
+                <p class="text-xs text-slate-400 mt-1">Strict reproducible pipeline executing raw JSON ingestion, type casting, six-state filtering, duplicate revision deduplication, entity matching with state blocking, and upward grain aggregation.</p>
+                <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2 mt-4 text-center text-xs font-mono">
+                    <div class="bg-slate-950 p-2.5 rounded border border-slate-800 text-slate-300">data.gov.in JSON</div>
+                    <div class="bg-slate-950 p-2.5 rounded border border-slate-800 text-indigo-400">DuckDB Staging</div>
+                    <div class="bg-slate-950 p-2.5 rounded border border-slate-800 text-emerald-400">Plausibility Checks</div>
+                    <div class="bg-slate-950 p-2.5 rounded border border-slate-800 text-sky-400">Entity Matching</div>
+                    <div class="bg-slate-950 p-2.5 rounded border border-slate-800 text-amber-400">Integration Mart</div>
+                    <div class="bg-slate-950 p-2.5 rounded border border-slate-800 text-purple-400">Dashboard & Reports</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SCREEN 2: DATA SOURCES & CLEANING -->
+        <!-- ============================================================== -->
+        <section id="screen-cleaning" class="screen-view hidden space-y-6">
+            <!-- Lineage Catalog Table -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-sm font-semibold text-white">Registered Official Datasets & Lineage Provenance</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Every row traces directly to a verified resource ID with cryptographic SHA-256 hash.</p>
+                    </div>
+                    <span class="text-xs text-emerald-400 font-mono">Rule D10 Compliant</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950 text-slate-400 uppercase font-mono text-[11px] border-b border-slate-800">
+                            <tr>
+                                <th class="px-6 py-3">Clean Table</th>
+                                <th class="px-6 py-3">Clean Rows</th>
+                                <th class="px-6 py-3">Resource ID</th>
+                                <th class="px-6 py-3">Official Portal Page</th>
+                                <th class="px-6 py-3">SHA-256 Checksum</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800 font-mono" id="catalog-table-body">
+                            <tr><td colspan="5" class="px-6 py-4 text-center text-slate-500">Loading catalog...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- EV Summary Reconciliation Audit -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-sm font-semibold text-white">EV Summary Row Arithmetic Reconciliation</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Government tables embed aggregate summary rows ("Total", "Grand Total"). We extract them and verify calculated sums against reported totals.</p>
+                    </div>
+                    <span class="text-xs text-emerald-400 font-mono font-medium">Reconciliation Audit</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950 text-slate-400 uppercase font-mono text-[11px] border-b border-slate-800">
+                            <tr>
+                                <th class="px-6 py-3">Table Name</th>
+                                <th class="px-6 py-3">Reported Total</th>
+                                <th class="px-6 py-3">Calculated Sum</th>
+                                <th class="px-6 py-3">Difference</th>
+                                <th class="px-6 py-3">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800 font-mono" id="reconciliation-table-body">
+                            <tr><td colspan="5" class="px-6 py-4 text-center text-slate-500">Loading reconciliation results...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Column Data Quality Profiling -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-sm font-semibold text-white">Semantic Column Profiling (Data Quality Summary)</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Rule-based semantic classification, completeness auditing, and cardinality profiling.</p>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <label class="text-xs text-slate-400">Filter table:</label>
+                        <select id="dq-filter-table" class="bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1 focus:outline-none">
+                            <option value="">All Tables</option>
+                            <option value="clean_pincode">clean_pincode</option>
+                            <option value="clean_mgnrega">clean_mgnrega</option>
+                            <option value="clean_msme">clean_msme</option>
+                            <option value="clean_ev_pcs_2024">clean_ev_pcs_2024</option>
+                            <option value="clean_ev_omc_2025">clean_ev_omc_2025</option>
+                            <option value="clean_ev_vahan_2023">clean_ev_vahan_2023</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="overflow-x-auto max-h-96">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950/80 sticky top-0 text-slate-400 uppercase font-mono text-[11px] border-b border-slate-800">
+                            <tr>
+                                <th class="px-6 py-3">Table</th>
+                                <th class="px-6 py-3">Column Name</th>
+                                <th class="px-6 py-3">Semantic Type</th>
+                                <th class="px-6 py-3">Total Rows</th>
+                                <th class="px-6 py-3">Null Count</th>
+                                <th class="px-6 py-3">Unique Values</th>
+                                <th class="px-6 py-3">Quality Flags</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800 font-mono" id="dq-table-body">
+                            <tr><td colspan="7" class="px-6 py-4 text-center text-slate-500">Loading column profiles...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SCREEN 3: DATASET INTEGRATION & GRAPH -->
+        <!-- ============================================================== -->
+        <section id="screen-integration" class="screen-view hidden space-y-6">
+            <!-- Network Graph Visualizer -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+                    <div>
+                        <h2 class="text-sm font-semibold text-white">NetworkX Dataset Integration Graph</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Enforces grain rules: district data is aggregated UP to state level before joining with EV tables.</p>
+                    </div>
+                    <span class="text-xs text-indigo-400 font-mono">9 Nodes • 7 Validated Edges</span>
+                </div>
+                <div id="graph-container" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
+                    <!-- Graph nodes populated via JS -->
+                </div>
+            </div>
+
+            <!-- Grain Enforcement Principles -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+                    <h3 class="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Validated Joins</h3>
+                    <ul class="mt-3 space-y-2 text-xs text-slate-300">
+                        <li class="flex items-start space-x-2">
+                            <span class="text-emerald-400">✓</span>
+                            <span><strong>Pincode to District:</strong> Aggregated N:1 by <code>(norm_state, norm_district)</code> computing PIN counts and centroid coordinates.</span>
+                        </li>
+                        <li class="flex items-start space-x-2">
+                            <span class="text-emerald-400">✓</span>
+                            <span><strong>MGNREGA to District:</strong> Filtered to FY 2024-25 and aggregated N:1 computing annual persondays and expenditure.</span>
+                        </li>
+                        <li class="flex items-start space-x-2">
+                            <span class="text-emerald-400">✓</span>
+                            <span><strong>MSME to District:</strong> Joined 1:1 on resolved canonical keys with zero duplicate expansion.</span>
+                        </li>
+                        <li class="flex items-start space-x-2">
+                            <span class="text-emerald-400">✓</span>
+                            <span><strong>District to State:</strong> District totals rolled UP to state grain before joining with PCS 2024 and OMC 2025.</span>
+                        </li>
+                    </ul>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+                    <h3 class="text-xs font-semibold text-rose-400 uppercase tracking-wider">Enforced Grain Prohibitions</h3>
+                    <ul class="mt-3 space-y-2 text-xs text-slate-300">
+                        <li class="flex items-start space-x-2">
+                            <span class="text-rose-400">✕</span>
+                            <span><strong>Direct State-to-District 1:N Join:</strong> Prohibited. Joining state-level EV tables directly into district rows causes spurious duplicate repetition.</span>
+                        </li>
+                        <li class="flex items-start space-x-2">
+                            <span class="text-rose-400">✕</span>
+                            <span><strong>Corridor Geographic Join:</strong> Prohibited. <code>clean_ev_corridor_2022</code> lacks state/district administrative keys and remains an isolated list.</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SCREEN 4: ENTITY MATCHING & REVIEW QUEUE -->
+        <!-- ============================================================== -->
+        <section id="screen-resolver" class="screen-view hidden space-y-6">
+            <!-- Dynamic Resolver Tester -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm">
+                <h2 class="text-sm font-semibold text-white">Interactive District Entity Resolver</h2>
+                <p class="text-xs text-slate-400 mt-1">Test real-time matching with strict state blocking, consonant skeletons, and 3 baseline comparisons.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                    <div>
+                        <label class="text-xs text-slate-400">State (Strict Blocking)</label>
+                        <select id="resolve-state-input" class="w-full bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded px-3 py-2 mt-1 focus:outline-none">
+                            <option value="Tamil Nadu">Tamil Nadu</option>
+                            <option value="Karnataka">Karnataka</option>
+                            <option value="Kerala">Kerala</option>
+                            <option value="Andhra Pradesh">Andhra Pradesh</option>
+                            <option value="Telangana">Telangana</option>
+                            <option value="Puducherry">Puducherry</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-400">Source District String</label>
+                        <input id="resolve-name-input" type="text" placeholder="e.g. tuticorin, pathanamthipta, bagalkote" class="w-full bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded px-3 py-2 mt-1 focus:outline-none">
+                    </div>
+                    <div class="flex items-end">
+                        <button onclick="runResolveTest()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold py-2 px-4 rounded transition">
+                            Resolve District
+                        </button>
+                    </div>
+                </div>
+                <div id="resolve-output" class="mt-4 p-4 rounded bg-slate-950 border border-slate-800 font-mono text-xs hidden">
+                    <!-- Populated via JS -->
+                </div>
+            </div>
+
+            <!-- Interactive Hand-Labelling Review Queue -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                <div class="px-6 py-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <h2 class="text-sm font-semibold text-white">Student Hand-Labelling Queue (Section 9 Protocol)</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Annotate non-exact matches to establish ground truth for model evaluation. Saves to <code>data/labels/hand_labels.csv</code>.</p>
+                    </div>
+                    <div class="flex items-center space-x-3 text-xs font-mono">
+                        <span class="text-slate-400">Progress: <strong id="queue-progress-count" class="text-indigo-400">0</strong> / 36 labelled</span>
+                        <span class="text-slate-500">•</span>
+                        <span class="text-amber-400">Min 30 for Viva Evaluation</span>
+                    </div>
+                </div>
+                <div class="overflow-x-auto max-h-[500px]">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950/80 sticky top-0 text-slate-400 uppercase font-mono text-[11px] border-b border-slate-800">
+                            <tr>
+                                <th class="px-4 py-3">ID</th>
+                                <th class="px-4 py-3">State</th>
+                                <th class="px-4 py-3">Source Name</th>
+                                <th class="px-4 py-3">Candidate 1</th>
+                                <th class="px-4 py-3">Candidate 2</th>
+                                <th class="px-4 py-3">Candidate 3</th>
+                                <th class="px-4 py-3">Label Choice</th>
+                                <th class="px-4 py-3">Initials</th>
+                                <th class="px-4 py-3">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800 font-mono text-[11px]" id="review-queue-body">
+                            <tr><td colspan="9" class="px-6 py-4 text-center text-slate-500">Loading labelling queue...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SCREEN 5: EV COVERAGE EXPLORER -->
+        <!-- ============================================================== -->
+        <section id="screen-ev" class="screen-view hidden space-y-6">
+            <!-- Prominent Limitations & Warning Notices -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-amber-950/40 border border-amber-600/40 rounded-xl p-4 text-xs text-amber-200 space-y-1.5">
+                    <div class="font-bold uppercase tracking-wider text-amber-400 flex items-center space-x-1.5">
+                        <span>⚠️</span><span>Definition Divergence Notice</span>
+                    </div>
+                    <p>PCS 2024 measures Operational Public Charging Stations (MHI). OMC 2025 measures PSU Oil Marketing retail outlet stations. They have <strong>different definitions</strong> and must NEVER be treated as a single time series.</p>
+                </div>
+                <div class="bg-sky-950/40 border border-sky-600/40 rounded-xl p-4 text-xs text-sky-200 space-y-1.5">
+                    <div class="font-bold uppercase tracking-wider text-sky-400 flex items-center space-x-1.5">
+                        <span>ℹ️</span><span>Date Gap & Missing Telangana Notice</span>
+                    </div>
+                    <p>Vehicles are as of 14-07-2023; chargers are 2024 and 2025. Ratios are cross-period approximations. Telangana is entirely absent from e-Vahan 2023 and shown as <em>Not available</em>.</p>
+                </div>
+            </div>
+
+            <!-- Charts Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                    <h3 class="text-xs font-semibold text-slate-300 mb-2">Chargers by State (PCS 2024 vs OMC 2025)</h3>
+                    <div id="chart-ev-chargers" style="height: 280px;"></div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                    <h3 class="text-xs font-semibold text-slate-300 mb-2">EV Penetration % vs Chargers per 1k EVs</h3>
+                    <div id="chart-ev-ratios" style="height: 280px;"></div>
+                </div>
+            </div>
+
+            <!-- State EV Coverage Table -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-sm font-semibold text-white">South Indian State EV Infrastructure Comparison</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Strict side-by-side comparative table with explicit missing state labeling.</p>
+                    </div>
+                    <span class="text-xs text-indigo-400 font-mono">State Grain Mart</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950 text-slate-400 uppercase font-mono text-[11px] border-b border-slate-800">
+                            <tr>
+                                <th class="px-5 py-3">State</th>
+                                <th class="px-5 py-3">PCS 2024</th>
+                                <th class="px-5 py-3">OMC 2025</th>
+                                <th class="px-5 py-3">Registered EVs (2023)</th>
+                                <th class="px-5 py-3">EV Share %</th>
+                                <th class="px-5 py-3">PCS / 1k EVs</th>
+                                <th class="px-5 py-3">OMC / 1k EVs</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800 font-mono" id="ev-state-table-body">
+                            <tr><td colspan="7" class="px-6 py-4 text-center text-slate-500">Loading EV coverage metrics...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Highway Corridors Table -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-sm font-semibold text-white">National Highway & Expressway Charging Corridors (2022)</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Isolated corridor-level station counts from MoRTH (no state administrative key).</p>
+                    </div>
+                    <span class="text-xs text-slate-500 font-mono">16 Listed Corridors</span>
+                </div>
+                <div class="overflow-x-auto max-h-60">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950 sticky top-0 text-slate-400 uppercase font-mono text-[11px] border-b border-slate-800">
+                            <tr>
+                                <th class="px-6 py-2.5">Corridor / Highway / Expressway</th>
+                                <th class="px-6 py-2.5">Station Count</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800 font-mono" id="corridor-table-body">
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SCREEN 6: REPORTS & RELEASE -->
+        <!-- ============================================================== -->
+        <section id="screen-reports" class="screen-view hidden space-y-6">
+            <!-- Suspected Errors Table -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-sm font-semibold text-white">Audit Register of Suspected Government Data Anomalies</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Objective, non-assertive documentation of clerical errors and integration divergences discovered in portal files.</p>
+                    </div>
+                    <span class="text-xs text-rose-400 font-mono">Neutral Phrasing</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950 text-slate-400 uppercase font-mono text-[11px] border-b border-slate-800">
+                            <tr>
+                                <th class="px-5 py-3">ID</th>
+                                <th class="px-5 py-3">Table Source</th>
+                                <th class="px-5 py-3">Category</th>
+                                <th class="px-5 py-3">Observed Evidence</th>
+                                <th class="px-5 py-3">Handling in Pipeline</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800 font-mono text-[11px]" id="errors-table-body">
+                            <tr><td colspan="5" class="px-6 py-4 text-center text-slate-500">Loading error register...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Release Package Generator -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h3 class="text-sm font-semibold text-white">Export Official Release Package (.zip)</h3>
+                    <p class="text-xs text-slate-400 mt-0.5">Bundles clean CSV marts, dataset card with data.gov.in attribution, suspected error report, and labelling queue.</p>
+                </div>
+                <a href="/api/reports/release" download class="inline-flex items-center px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow transition">
+                    Download Release Package (.zip)
+                </a>
+            </div>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SCREEN 7: MODEL EVALUATION -->
+        <!-- ============================================================== -->
+        <section id="screen-eval" class="screen-view hidden space-y-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+                    <div>
+                        <h2 class="text-sm font-semibold text-white">Model Evaluation & Benchmark Comparison</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Evaluates Baseline 1 (Exact), Baseline 2 (TF-IDF), Baseline 3 (RapidFuzz), and Logistic Regression.</p>
+                    </div>
+                    <span class="text-xs text-indigo-400 font-mono">Strictly Evaluated on Hand Labels</span>
+                </div>
+                <div id="eval-metrics-content" class="mt-4 text-xs font-mono">
+                    <p class="text-slate-400">Loading evaluation benchmarks from results.json...</p>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-slate-900 border-t border-slate-800 px-6 py-4 text-center text-xs text-slate-500 font-mono">
+        South India Open Data Integration Engine • Strictly data.gov.in • Built for TCS M.Sc. Viva Defense
+    </footer>
+
+    <!-- App JavaScript -->
+    <script>
+        function switchTab(screenId) {
+            document.querySelectorAll('.screen-view').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+
+            const target = document.getElementById(screenId);
+            if (target) target.classList.remove('hidden');
+
+            const activeBtn = document.getElementById('tab-' + screenId);
+            if (activeBtn) activeBtn.classList.add('active');
+
+            if (screenId === 'screen-ev') {
+                renderEvCharts();
+            }
+        }
+
+        async function loadOverview() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                const counts = data.table_counts || {};
+
+                document.getElementById('stat-pincode').innerText = (counts['clean_pincode'] || 0).toLocaleString();
+                document.getElementById('stat-mgnrega').innerText = (counts['clean_mgnrega'] || 0).toLocaleString();
+                document.getElementById('stat-msme').innerText = (counts['clean_msme'] || 0).toLocaleString();
+                const evCount = (counts['clean_ev_pcs_2024'] || 0) + (counts['clean_ev_omc_2025'] || 0) + (counts['clean_ev_vahan_2023'] || 0);
+                document.getElementById('stat-ev').innerText = evCount.toLocaleString() + " records";
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function loadCatalog() {
+            try {
+                const res = await fetch('/api/catalog');
+                const items = await res.json();
+                const tbody = document.getElementById('catalog-table-body');
+                tbody.innerHTML = items.map(item => `
+                    <tr class="hover:bg-slate-800/50">
+                        <td class="px-6 py-3 font-semibold text-indigo-300">${item.table_name}</td>
+                        <td class="px-6 py-3">${item.row_count.toLocaleString()}</td>
+                        <td class="px-6 py-3 text-slate-400">${item.resource_id.substring(0, 16)}...</td>
+                        <td class="px-6 py-3"><a href="${item.source_url}" target="_blank" class="text-sky-400 hover:underline">portal ↗</a></td>
+                        <td class="px-6 py-3 text-slate-500 text-[10px]" title="${item.sha256}">${item.sha256.substring(0, 16)}...</td>
+                    </tr>
+                `).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        async function loadReconciliation() {
+            try {
+                const res = await fetch('/api/ev/reconciliation');
+                const items = await res.json();
+                const tbody = document.getElementById('reconciliation-table-body');
+                tbody.innerHTML = items.map(item => `
+                    <tr class="hover:bg-slate-800/50">
+                        <td class="px-6 py-3 font-semibold text-slate-200">${item.table_name}</td>
+                        <td class="px-6 py-3">${item.reported_total.toLocaleString()}</td>
+                        <td class="px-6 py-3">${item.calculated_sum.toLocaleString()}</td>
+                        <td class="px-6 py-3">${item.difference}</td>
+                        <td class="px-6 py-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${item.status === 'RECONCILED' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300'}">${item.status}</span></td>
+                    </tr>
+                `).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        async function loadDQ(table = '') {
+            try {
+                const url = table ? `/api/dq?table=${encodeURIComponent(table)}` : '/api/dq';
+                const res = await fetch(url);
+                const items = await res.json();
+                const tbody = document.getElementById('dq-table-body');
+                tbody.innerHTML = items.map(item => `
+                    <tr class="hover:bg-slate-800/50">
+                        <td class="px-6 py-2 text-slate-400">${item.table_name}</td>
+                        <td class="px-6 py-2 font-medium text-slate-200">${item.column_name}</td>
+                        <td class="px-6 py-2"><span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px]">${item.semantic_type}</span></td>
+                        <td class="px-6 py-2 text-slate-400">${item.total_rows.toLocaleString()}</td>
+                        <td class="px-6 py-2 ${item.null_count > 0 ? 'text-amber-400' : 'text-slate-500'}">${item.null_count.toLocaleString()}</td>
+                        <td class="px-6 py-2 text-slate-400">${item.unique_count.toLocaleString()}</td>
+                        <td class="px-6 py-2 text-slate-400">${item.notes || '—'}</td>
+                    </tr>
+                `).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        document.getElementById('dq-filter-table').addEventListener('change', (e) => loadDQ(e.target.value));
+
+        async function loadGraph() {
+            try {
+                const res = await fetch('/api/graph');
+                const data = await res.json();
+                const container = document.getElementById('graph-container');
+                container.innerHTML = data.nodes.map(n => `
+                    <div class="p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div class="font-bold text-indigo-300">${n.label}</div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">Grain: ${n.grain} • Layer: ${n.layer}</div>
+                        <div class="text-[10px] text-emerald-400 mt-1">${(n.records || 0).toLocaleString()} rows</div>
+                    </div>
+                `).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        async function runResolveTest() {
+            const state = document.getElementById('resolve-state-input').value;
+            const src = document.getElementById('resolve-name-input').value.trim();
+            if (!src) return;
+
+            try {
+                const res = await fetch('/api/resolve', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ state, source_name: src })
+                });
+                const data = await res.json();
+                const out = document.getElementById('resolve-output');
+                out.classList.remove('hidden');
+                out.innerHTML = `
+                    <div class="text-sm font-bold text-white mb-2">Resolution Result for "${data.source_name}" (${data.state})</div>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                        <div class="p-2 rounded bg-slate-900 border border-slate-800">
+                            <span class="text-slate-400 text-[10px]">Baseline 1 (Exact):</span>
+                            <div class="text-emerald-400 font-bold">${data.baseline_exact || 'None'} (${data.baseline_exact_score})</div>
+                        </div>
+                        <div class="p-2 rounded bg-slate-900 border border-slate-800">
+                            <span class="text-slate-400 text-[10px]">Baseline 2 (TF-IDF):</span>
+                            <div class="text-sky-400 font-bold">${data.baseline_tfidf || 'None'} (${data.baseline_tfidf_score.toFixed(3)})</div>
+                        </div>
+                        <div class="p-2 rounded bg-slate-900 border border-slate-800">
+                            <span class="text-slate-400 text-[10px]">Baseline 3 (RapidFuzz):</span>
+                            <div class="text-indigo-400 font-bold">${data.baseline_rapidfuzz || 'None'} (${data.baseline_rapidfuzz_score.toFixed(3)})</div>
+                        </div>
+                    </div>
+                    <div class="text-xs text-amber-300">Decision Band: <strong>${data.decision_band}</strong> • Model Prediction: <strong class="text-white">${data.model_prediction}</strong></div>
+                `;
+            } catch (e) { console.error(e); }
+        }
+
+        async function loadReviewQueue() {
+            try {
+                const res = await fetch('/api/review-queue');
+                const items = await res.json();
+                const tbody = document.getElementById('review-queue-body');
+                let labelled = 0;
+
+                tbody.innerHTML = items.map(item => {
+                    const isLabelled = item.label && item.label !== '';
+                    if (isLabelled) labelled++;
+
+                    return `
+                        <tr class="hover:bg-slate-800/50 transition ${isLabelled ? 'bg-emerald-950/40 border-l-2 border-emerald-500' : ''}" id="queue-row-${item.id}">
+                            <td class="px-4 py-2 font-bold text-slate-400">${item.id}</td>
+                            <td class="px-4 py-2 text-indigo-300">${item.state}</td>
+                            <td class="px-4 py-2 font-semibold text-white">${item.source_name}</td>
+                            <td class="px-4 py-2 text-slate-300">${item.cand1 || '—'} <span class="text-slate-500">(${item.score1})</span></td>
+                            <td class="px-4 py-2 text-slate-400">${item.cand2 || '—'} <span class="text-slate-600">(${item.score2})</span></td>
+                            <td class="px-4 py-2 text-slate-400">${item.cand3 || '—'} <span class="text-slate-600">(${item.score3})</span></td>
+                            <td class="px-4 py-2">
+                                <select id="label-select-${item.id}" class="bg-slate-950 border border-slate-700 text-slate-200 rounded px-1.5 py-1 text-[11px] focus:border-indigo-500">
+                                    <option value="" ${item.label === '' ? 'selected' : ''}>-- choose --</option>
+                                    <option value="1" ${item.label === '1' ? 'selected' : ''}>1 (Cand 1)</option>
+                                    <option value="2" ${item.label === '2' ? 'selected' : ''}>2 (Cand 2)</option>
+                                    <option value="3" ${item.label === '3' ? 'selected' : ''}>3 (Cand 3)</option>
+                                    <option value="none" ${item.label === 'none' ? 'selected' : ''}>none</option>
+                                    <option value="unsure" ${item.label === 'unsure' ? 'selected' : ''}>unsure</option>
+                                </select>
+                            </td>
+                            <td class="px-4 py-2">
+                                <input id="labeller-input-${item.id}" onkeydown="if(event.key==='Enter') saveReviewLabel(${item.id})" type="text" placeholder="Initials" value="${item.labeller || ''}" class="w-16 bg-slate-950 border border-slate-700 text-slate-200 rounded px-1.5 py-1 text-[11px] uppercase focus:border-indigo-500">
+                            </td>
+                            <td class="px-4 py-2">
+                                <button id="btn-save-${item.id}" onclick="saveReviewLabel(${item.id})" class="px-2.5 py-1 ${isLabelled ? 'bg-emerald-700 text-white' : 'bg-indigo-600 hover:bg-indigo-500 text-white'} rounded text-[10px] font-semibold transition">
+                                    ${isLabelled ? 'Saved ✓' : 'Save'}
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+
+                document.getElementById('queue-progress-count').innerText = labelled;
+            } catch (e) { console.error(e); }
+        }
+
+        async function saveReviewLabel(rowId) {
+            const selectEl = document.getElementById(`label-select-${rowId}`);
+            const inputEl = document.getElementById(`labeller-input-${rowId}`);
+            const labelVal = selectEl.value;
+            const labellerVal = inputEl.value.trim();
+
+            if (!labelVal) {
+                alert('Please select a label (1, 2, 3, none, or unsure)');
+                return;
+            }
+            if (!labellerVal) {
+                alert('Please enter your initials in the labeller field');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/review/accept', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        id: rowId,
+                        label: labelVal,
+                        labeller: labellerVal
+                    })
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    alert(`Save failed: ${err.detail || 'Server error'}`);
+                    return;
+                }
+                const data = await res.json();
+                if (data.status === 'success') {
+                    const rowEl = document.getElementById(`queue-row-${rowId}`);
+                    rowEl.className = 'hover:bg-slate-800/50 transition bg-emerald-950/50 border-l-2 border-emerald-400';
+                    const btn = document.getElementById(`btn-save-${rowId}`);
+                    if (btn) {
+                        btn.innerText = 'Saved ✓';
+                        btn.className = 'px-2.5 py-1 bg-emerald-700 text-white rounded text-[10px] font-semibold transition';
+                    }
+                    document.getElementById('queue-progress-count').innerText = data.total_labelled_count;
+                }
+            } catch (e) {
+                console.error(e);
+                alert(`Error: ${e.message}`);
+            }
+        }
+
+
+        let evDataCache = null;
+        async function loadEVData() {
+            try {
+                const res = await fetch('/api/ev/coverage');
+                evDataCache = await res.json();
+                renderEvTable(evDataCache.states);
+                renderCorridors(evDataCache.corridors);
+            } catch (e) { console.error(e); }
+        }
+
+        function renderEvTable(states) {
+            const tbody = document.getElementById('ev-state-table-body');
+            tbody.innerHTML = states.map(s => {
+                const isTelangana = s.state === 'Telangana';
+                return `
+                    <tr class="hover:bg-slate-800/50">
+                        <td class="px-5 py-3 font-semibold text-slate-200">${s.state}</td>
+                        <td class="px-5 py-3">${s.pcs_2024.toLocaleString()}</td>
+                        <td class="px-5 py-3">${s.omc_2025.toLocaleString()}</td>
+                        <td class="px-5 py-3">${isTelangana ? '<span class="text-amber-400">Not available: dataset missing</span>' : s.ev_count_2023.toLocaleString()}</td>
+                        <td class="px-5 py-3">${isTelangana ? '<span class="text-amber-400">Not available: dataset missing</span>' : s.ev_share_pct + '%'}</td>
+                        <td class="px-5 py-3">${isTelangana ? '<span class="text-amber-400">Not available</span>' : s.chargers_per_1000_evs_2024}</td>
+                        <td class="px-5 py-3">${isTelangana ? '<span class="text-amber-400">Not available</span>' : s.chargers_per_1000_evs_2025}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderCorridors(corridors) {
+            const tbody = document.getElementById('corridor-table-body');
+            tbody.innerHTML = corridors.map(c => `
+                <tr class="hover:bg-slate-800/50">
+                    <td class="px-6 py-2 text-slate-300">${c.corridor_name}</td>
+                    <td class="px-6 py-2 font-bold text-indigo-400">${c.station_count}</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderEvCharts() {
+            if (!evDataCache) return;
+            const states = evDataCache.states;
+            const names = states.map(s => s.state);
+            const pcs = states.map(s => s.pcs_2024);
+            const omc = states.map(s => s.omc_2025);
+
+            const trace1 = {
+                x: names,
+                y: pcs,
+                name: 'PCS 2024 (MHI)',
+                type: 'bar',
+                marker: { color: '#6366f1' }
+            };
+            const trace2 = {
+                x: names,
+                y: omc,
+                name: 'OMC 2025 (PSU Fuel Outlets)',
+                type: 'bar',
+                marker: { color: '#10b981' }
+            };
+
+            const layout1 = {
+                barmode: 'group',
+                paper_bgcolor: 'transparent',
+                plot_bgcolor: 'transparent',
+                font: { color: '#94a3b8', family: 'Inter' },
+                margin: { t: 20, b: 40, l: 40, r: 20 },
+                legend: { orientation: 'h', y: -0.2 }
+            };
+            Plotly.newPlot('chart-ev-chargers', [trace1, trace2], layout1, { responsive: true, displayModeBar: false });
+
+            // Ratio scatter
+            const validStates = states.filter(s => typeof s.ev_count_2023 === 'number');
+            const trace3 = {
+                x: validStates.map(s => s.ev_share_pct),
+                y: validStates.map(s => s.chargers_per_1000_evs_2024),
+                mode: 'markers+text',
+                text: validStates.map(s => s.state),
+                textposition: 'top center',
+                marker: { size: 12, color: '#38bdf8' }
+            };
+            const layout2 = {
+                paper_bgcolor: 'transparent',
+                plot_bgcolor: 'transparent',
+                font: { color: '#94a3b8', family: 'Inter' },
+                xaxis: { title: 'EV Share of Vehicles (%)' },
+                yaxis: { title: 'PCS Chargers / 1k EVs' },
+                margin: { t: 20, b: 40, l: 40, r: 20 }
+            };
+            Plotly.newPlot('chart-ev-ratios', [trace3], layout2, { responsive: true, displayModeBar: false });
+        }
+
+        async function loadReports() {
+            try {
+                const res = await fetch('/api/reports/errors');
+                const errors = await res.json();
+                const tbody = document.getElementById('errors-table-body');
+                tbody.innerHTML = errors.map(e => `
+                    <tr class="hover:bg-slate-800/50">
+                        <td class="px-5 py-2.5 font-bold text-rose-400">${e.id}</td>
+                        <td class="px-5 py-2.5 text-slate-300">${e.table}</td>
+                        <td class="px-5 py-2.5 text-amber-300">${e.category}</td>
+                        <td class="px-5 py-2.5 text-slate-400">${e.evidence}</td>
+                        <td class="px-5 py-2.5 text-emerald-400">${e.status}</td>
+                    </tr>
+                `).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        async function loadEval() {
+            try {
+                const res = await fetch('/api/eval');
+                const data = await res.json();
+                const el = document.getElementById('eval-metrics-content');
+                if (data.status === 'Awaiting Hand Labels') {
+                    el.innerHTML = `
+                        <div class="p-4 rounded bg-amber-950/40 border border-amber-600/40 text-amber-200">
+                            <div class="font-bold text-amber-400">⚠️ Evaluation Gate: ${data.status}</div>
+                            <p class="mt-1">${data.message}</p>
+                            <p class="mt-2 text-slate-400 text-[11px]">Go to Tab 4 (Entity Matching & Review Queue) to annotate the candidate pairs.</p>
+                        </div>
+                    `;
+                } else {
+                    el.innerHTML = `<pre class="text-slate-300 p-4 bg-slate-950 rounded border border-slate-800 overflow-x-auto">${JSON.stringify(data, null, 2)}</pre>`;
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        // Initialize all tabs
+        loadOverview();
+        loadCatalog();
+        loadReconciliation();
+        loadDQ();
+        loadGraph();
+        loadReviewQueue();
+        loadEVData();
+        loadReports();
+        loadEval();
+    </script>
+</body>
+</html>

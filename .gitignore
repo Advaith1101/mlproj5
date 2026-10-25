@@ -1,0 +1,11 @@
+.env
+data/*
+!data/labels/
+data/labels/*
+!data/labels/hand_labels.csv
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
