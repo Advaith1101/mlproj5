@@ -274,8 +274,8 @@ def build_integrated_tables_in_db(conn: duckdb.DuckDBPyConnection) -> None:
         SELECT
             norm_state,
             norm_district,
-            ROUND(SUM(TRY_CAST(REPLACE(Persondays_of_Central_Liability_so_far, ',', '') AS DOUBLE)), 2) as annual_persondays_generated,
-            ROUND(SUM(TRY_CAST(REPLACE(Total_Exp, ',', '') AS DOUBLE)), 2) as annual_total_expenditure
+            ROUND(SUM(TRY_CAST(Persondays_of_Central_Liability_so_far AS DOUBLE)), 2) as annual_persondays_generated,
+            ROUND(SUM(TRY_CAST(Total_Exp AS DOUBLE)), 2) as annual_total_expenditure
         FROM clean_mgnrega
         WHERE fin_year = '2024-2025'
         GROUP BY norm_state, norm_district

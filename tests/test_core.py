@@ -182,7 +182,7 @@ class TestFetchDataLogic:
             )
 
             assert entry["row_count"] == 2
-            assert entry["sha256"] == hashlib.sha256(csv_content.encode("utf-8")).hexdigest()
+            assert entry["sha256"] == hashlib.sha256(csv_file.read_bytes()).hexdigest()
             assert manifest_path.exists()
 
 

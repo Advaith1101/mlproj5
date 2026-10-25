@@ -264,3 +264,25 @@ The project adheres strictly to the 14-file architectural cap (Section 6). No un
 
 **Q20: Why are weak labels prohibited from evaluation?**  
 *Answer:* Weak labels derived from exact string matching can provide positive training pairs for the classifier, but using them in evaluation would artificially inflate performance metrics (circular evaluation). Evaluation is conducted strictly on student hand-annotated labels.
+
+
+## Interactive ML Studio (enhanced dashboard)
+
+The dashboard now includes additional user-facing analytics while preserving the existing pipeline and tabs:
+
+- **District matcher:** top-five candidates, per-candidate string-similarity evidence, configurable auto-link threshold, and a separate correction log (`data/labels/user_corrections.csv`). Similarity scores are explicitly not presented as calibrated probabilities.
+- **Batch CSV matching:** upload a CSV, select state and district-name columns, preview the first 100 results, and export all results to `district_match_results.csv`. Limits: 10 MB and 10,000 rows per upload. Uploaded files are processed in memory and are not persisted.
+- **Data-quality analytics:** dataset completeness, highest missing-value rates, and transformation rows-in/rows-out charts sourced from DuckDB metadata.
+- **EV state explorer:** interactive state-centroid markers and metric/state filters. Markers represent state-level aggregates only; they are not charging-station locations. Source limitations and the PCS/OMC definition warning remain in place.
+- **Model evaluation charts:** compare the four existing approaches using measured results from the labelled evaluation workflow. The dashboard displays the current label count and keeps the evaluation gate at 30 labels rather than substituting synthetic metrics.
+
+### Run locally
+
+```bash
+python -m pip install -r requirements.txt
+python pipeline.py
+python evaluate.py   # after at least 30 valid hand labels are available
+uvicorn api:app --reload
+```
+
+Open `http://127.0.0.1:8000`. Plotly, Leaflet and the map tiles load from their public CDNs, so those visual assets require an internet connection. The API, DuckDB queries, and CSV matching run locally. User corrections are kept separate from hand-labelled evaluation data so they do not silently contaminate reported metrics.

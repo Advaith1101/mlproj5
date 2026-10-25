@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from io import BytesIO
+from datetime import datetime, timezone
 
 import duckdb
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Response, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
@@ -47,6 +50,8 @@ LABELS_DIR = DATA_DIR / "labels"
 QUEUE_FILE = LABELS_DIR / "labelling_queue.csv"
 HAND_LABELS_FILE = LABELS_DIR / "hand_labels.csv"
 EVAL_RESULTS_FILE = WORK_DIR / "results.json"
+FEEDBACK_FILE = LABELS_DIR / "user_corrections.csv"
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
 def get_db_connection() -> duckdb.DuckDBPyConnection:
@@ -70,7 +75,8 @@ class SystemStatus(BaseModel):
 
 class ResolveRequest(BaseModel):
     state: str = Field(..., description="Target South Indian state")
-    source_name: str = Field(..., description="Raw district string to match")
+    source_name: str = Field(..., min_length=1, max_length=200, description="Raw district string to match")
+    threshold: float = Field(0.85, ge=0.0, le=1.0, description="Similarity threshold for automatic-link decisions")
 
 
 class ResolveResponse(BaseModel):
@@ -86,6 +92,13 @@ class ResolveResponse(BaseModel):
     model_prediction: Optional[str]
     model_confidence: float
     decision_band: str
+
+
+class CorrectionSubmission(BaseModel):
+    state: str = Field(..., min_length=1, max_length=100)
+    source_name: str = Field(..., min_length=1, max_length=200)
+    chosen_candidate: str = Field(..., min_length=1, max_length=200)
+    suggested_by: str = Field("dashboard", max_length=100)
 
 
 class ReviewLabelSubmission(BaseModel):
@@ -199,6 +212,28 @@ def get_dq(table: Optional[str] = None) -> List[Dict[str, Any]]:
 def get_dataset_graph() -> Dict[str, Any]:
     """Retrieve NetworkX integration graph nodes and validated join edges."""
     return build_dataset_graph_json(db_path=DB_PATH)
+
+
+@app.get("/api/districts")
+def get_integrated_districts(state: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Return integrated district mart records with socioeconomic, economic, and postal metrics."""
+    conn = get_db_connection()
+    try:
+        tables = [t[0] for t in conn.execute("SHOW TABLES").fetchall()]
+        if "integrated_districts" not in tables:
+            return []
+
+        if state:
+            df = conn.execute(
+                "SELECT * FROM integrated_districts WHERE UPPER(norm_state) = UPPER(?) ORDER BY norm_district",
+                [state.strip()],
+            ).fetchdf()
+        else:
+            df = conn.execute("SELECT * FROM integrated_districts ORDER BY norm_state, norm_district").fetchdf()
+
+        return df.fillna(0).to_dict(orient="records")
+    finally:
+        conn.close()
 
 
 @app.get("/api/ev/coverage")
@@ -325,50 +360,169 @@ def submit_review_label(submission: ReviewLabelSubmission) -> Dict[str, Any]:
 
 @app.post("/api/resolve", response_model=ResolveResponse)
 def resolve_entity(req: ResolveRequest) -> ResolveResponse:
-    """Test resolution of an arbitrary district string against canonical references."""
+    """Resolve a district and expose candidate evidence; scores are similarities, not probabilities."""
     conn = get_db_connection()
     try:
         ref_dict = load_canonical_reference_from_db(conn)
         resolver = DistrictResolver(reference_dict=ref_dict)
+        st, src = req.state.strip(), req.source_name.strip()
+        if not src:
+            raise HTTPException(status_code=422, detail="District name cannot be empty.")
+        if st not in ref_dict:
+            raise HTTPException(status_code=422, detail=f"No canonical reference data found for state: {st}")
 
-        st = req.state.strip()
-        src = req.source_name.strip()
-
-        # Baselines
         pred_ex, score_ex = resolver.baseline_exact(st, src)
         pred_tf, score_tf = resolver.baseline_tfidf(st, src)
         pred_rf, score_rf = resolver.baseline_rapidfuzz(st, src)
-
-        # Candidates
-        candidates = resolver.get_top_candidates(st, src, k=3)
-        cand_dicts = [{"candidate": c[0], "score": c[1]} for c in candidates]
-
+        candidates = resolver.get_top_candidates(st, src, k=5)
+        cand_dicts = []
+        for name, score in candidates:
+            feats = compute_similarity_features(src, name)
+            cand_dicts.append({
+                "candidate": name, "score": round(float(score), 4),
+                "evidence": {
+                    "token_sort_similarity": round(feats["rf_token_sort"], 4),
+                    "character_similarity": round(feats["rf_ratio"], 4),
+                    "partial_similarity": round(feats["rf_partial"], 4),
+                    "consonant_skeleton_similarity": round(feats["skeleton_sim"], 4),
+                    "first_character_matches": bool(feats["first_char_match"]),
+                    "length_difference": int(feats["len_diff"]),
+                },
+            })
         best_cand = candidates[0][0] if candidates else None
-        best_score = candidates[0][1] if candidates else 0.0
-
-        if best_score >= 0.85:
-            band = "AUTO_LINK (High Confidence)"
+        best_score = float(candidates[0][1]) if candidates else 0.0
+        if best_score >= req.threshold:
+            band = "AUTO_LINK (Threshold Met)"
         elif best_score >= 0.50:
             band = "REVIEW_QUEUE (Uncertain Band)"
         else:
-            band = "UNRESOLVED (Low Confidence)"
-
+            band = "UNRESOLVED (Low Similarity)"
         return ResolveResponse(
-            state=st,
-            source_name=src,
-            baseline_exact=pred_ex,
-            baseline_exact_score=score_ex,
-            baseline_tfidf=pred_tf,
-            baseline_tfidf_score=score_tf,
-            baseline_rapidfuzz=pred_rf,
-            baseline_rapidfuzz_score=score_rf,
-            top_candidates=cand_dicts,
-            model_prediction=best_cand,
-            model_confidence=best_score,
-            decision_band=band,
+            state=st, source_name=src,
+            baseline_exact=pred_ex, baseline_exact_score=float(score_ex),
+            baseline_tfidf=pred_tf, baseline_tfidf_score=float(score_tf),
+            baseline_rapidfuzz=pred_rf, baseline_rapidfuzz_score=float(score_rf),
+            top_candidates=cand_dicts, model_prediction=best_cand,
+            model_confidence=best_score, decision_band=band,
         )
     finally:
         conn.close()
+
+
+@app.post("/api/resolve/feedback")
+def save_resolution_feedback(submission: CorrectionSubmission) -> Dict[str, Any]:
+    """Save user corrections separately from evaluation labels to avoid contaminating ground truth."""
+    conn = get_db_connection()
+    try:
+        refs = load_canonical_reference_from_db(conn)
+        state = submission.state.strip()
+        candidate = submission.chosen_candidate.strip()
+        if state not in refs or candidate.lower() not in {x.lower() for x in refs[state]}:
+            raise HTTPException(status_code=422, detail="Chosen candidate must exist in the canonical directory for the selected state.")
+    finally:
+        conn.close()
+    FEEDBACK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "state": submission.state.strip(), "source_name": submission.source_name.strip(),
+        "chosen_candidate": submission.chosen_candidate.strip(),
+        "suggested_by": submission.suggested_by.strip() or "dashboard",
+    }
+    pd.DataFrame([row]).to_csv(FEEDBACK_FILE, mode="a", header=not FEEDBACK_FILE.exists(), index=False)
+    return {"status": "saved", "message": "Correction saved for review; it has not been added to evaluation labels."}
+
+
+@app.get("/api/analytics/quality")
+def get_quality_analytics() -> Dict[str, Any]:
+    """Aggregate existing DuckDB quality profiles and transformation logs for dashboard charts."""
+    conn = get_db_connection()
+    try:
+        tables = [r[0] for r in conn.execute("SHOW TABLES").fetchall()]
+        if "meta_data_quality" not in tables:
+            return {"status": "unavailable", "datasets": [], "columns": [], "transformations": []}
+        profiles = conn.execute("""
+            SELECT table_name, column_name, semantic_type, total_rows, null_count, unique_count, notes
+            FROM meta_data_quality ORDER BY table_name, column_name
+        """).fetchdf()
+        columns = []
+        for row in profiles.to_dict(orient="records"):
+            total = int(row.get("total_rows") or 0)
+            nulls = int(row.get("null_count") or 0)
+            columns.append({
+                "table_name": str(row["table_name"]), "column_name": str(row["column_name"]),
+                "semantic_type": str(row.get("semantic_type") or "unknown"),
+                "total_rows": total, "null_count": nulls,
+                "unique_count": int(row.get("unique_count") or 0),
+                "missing_pct": round(100 * nulls / total, 2) if total else 0.0,
+                "completeness_pct": round(100 * (total - nulls) / total, 2) if total else 100.0,
+                "notes": str(row.get("notes") or ""),
+            })
+        grouped = {}
+        for col in columns:
+            item = grouped.setdefault(col["table_name"], {"table_name": col["table_name"], "columns": 0, "total_cells": 0, "missing_cells": 0, "row_count": 0})
+            item["columns"] += 1
+            item["total_cells"] += col["total_rows"]
+            item["missing_cells"] += col["null_count"]
+            item["row_count"] = max(item["row_count"], col["total_rows"])
+        datasets = []
+        for item in grouped.values():
+            item["completeness_pct"] = round(100 * (item["total_cells"] - item["missing_cells"]) / item["total_cells"], 2) if item["total_cells"] else 100.0
+            item["missing_pct"] = round(100 - item["completeness_pct"], 2)
+            datasets.append(item)
+        transformations = []
+        if "meta_transform_log" in tables:
+            transforms = conn.execute("SELECT step, table_name, description, rows_in, rows_out FROM meta_transform_log ORDER BY step").fetchall()
+            transformations = [{"step": r[0], "table_name": r[1], "description": r[2], "rows_in": r[3], "rows_out": r[4], "rows_removed": max(0, int(r[3] or 0) - int(r[4] or 0))} for r in transforms]
+        return {"status": "ok", "datasets": datasets, "columns": columns, "transformations": transformations}
+    finally:
+        conn.close()
+
+
+@app.post("/api/upload/resolve")
+async def resolve_uploaded_csv(
+    file: UploadFile = File(...),
+    state_column: str = Form(...),
+    name_column: str = Form(...),
+    threshold: float = Form(0.85),
+) -> Dict[str, Any]:
+    """Resolve uploaded CSV rows; returns JSON suitable for review and CSV export in the UI."""
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Upload a .csv file.")
+    if not 0.0 <= threshold <= 1.0:
+        raise HTTPException(status_code=422, detail="Threshold must be between 0 and 1.")
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="CSV exceeds the 10 MB upload limit.")
+    try:
+        df = pd.read_csv(BytesIO(raw), dtype=str, keep_default_na=False)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {exc}")
+    if len(df) > 10000:
+        raise HTTPException(status_code=413, detail="CSV is limited to 10,000 rows per run.")
+    if state_column not in df.columns or name_column not in df.columns:
+        raise HTTPException(status_code=422, detail=f"Choose columns present in the CSV. Available: {', '.join(map(str, df.columns))}")
+    conn = get_db_connection()
+    try:
+        refs = load_canonical_reference_from_db(conn)
+    finally:
+        conn.close()
+    resolver = DistrictResolver(reference_dict=refs)
+    state_lookup = {str(key).casefold(): key for key in refs}
+    results = []
+    for index, row in df.iterrows():
+        raw_state = str(row[state_column]).strip()
+        state = state_lookup.get(raw_state.casefold(), raw_state)
+        source_name = str(row[name_column]).strip()
+        item = {"row_number": int(index) + 2, "state": raw_state, "source_name": source_name, "prediction": None, "similarity_score": 0.0, "decision": "UNRESOLVED", "top_candidates": []}
+        if state in refs and source_name:
+            candidates = resolver.get_top_candidates(state, source_name, k=3)
+            if candidates:
+                name, score = candidates[0]
+                item.update({"prediction": name, "similarity_score": round(float(score), 4), "decision": "AUTO_LINK" if score >= threshold else ("REVIEW" if score >= 0.50 else "UNRESOLVED"), "top_candidates": [{"candidate": c, "score": round(float(sc), 4)} for c, sc in candidates]})
+        elif state not in refs:
+            item["decision"] = "UNKNOWN_STATE"
+        results.append(item)
+    return {"filename": file.filename, "rows_processed": len(results), "threshold": threshold, "results": results}
 
 
 @app.get("/api/reports/errors")
@@ -394,12 +548,30 @@ def download_release_archive() -> Any:
 
 @app.get("/api/eval")
 def get_evaluation_metrics() -> Dict[str, Any]:
-    """Retrieve evaluation metrics and confidence intervals from results.json."""
-    if not EVAL_RESULTS_FILE.exists():
+    """Return measured evaluation results only when current hand-label count meets the evaluation gate."""
+    valid_count = 0
+    if HAND_LABELS_FILE.exists():
+        try:
+            labels = pd.read_csv(HAND_LABELS_FILE, dtype=str)
+            if "label" in labels.columns:
+                valid_count = int(labels["label"].fillna("").str.strip().str.lower().isin(["1", "2", "3", "none"]).sum())
+        except Exception:
+            valid_count = 0
+    if valid_count < 30:
         return {
             "status": "Awaiting Hand Labels",
-            "message": "Evaluation requires minimum 30 hand labels. Complete annotations in the Review Queue tab.",
-            "min_required": 30,
+            "message": f"Model comparison is gated until at least 30 valid hand labels are available. Current labelled rows: {valid_count}.",
+            "labelled_count": valid_count, "min_required": 30,
+            "remaining": 30 - valid_count,
         }
-    with open(EVAL_RESULTS_FILE, "r") as f:
-        return json.load(f)
+    if not EVAL_RESULTS_FILE.exists():
+        return {"status": "Evaluation Not Run", "message": "Run `python evaluate.py` to calculate metrics from the current labelled dataset.", "labelled_count": valid_count, "min_required": 30}
+    with open(EVAL_RESULTS_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    current_fingerprint = hashlib.sha256(HAND_LABELS_FILE.read_bytes()).hexdigest() if HAND_LABELS_FILE.exists() else None
+    if data.get("labels_sha256") and current_fingerprint != data.get("labels_sha256"):
+        return {"status": "Evaluation Not Current", "message": "Hand labels have changed since these metrics were computed. Run `python evaluate.py` to refresh the comparison.", "labelled_count": valid_count, "min_required": 30}
+    if int(data.get("sample_size_n", -1)) != valid_count:
+        return {"status": "Evaluation Not Current", "message": "The evaluated sample size differs from the current hand-label count. Run `python evaluate.py` to refresh the comparison.", "labelled_count": valid_count, "min_required": 30}
+    data["labelled_count"] = valid_count
+    return data
