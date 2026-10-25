@@ -22,3 +22,6 @@ networkx>=3.2.0
 fastapi>=0.110.0
 uvicorn>=0.28.0
 pydantic>=2.6.0
+
+# Multipart CSV uploads for the interactive district matcher
+python-multipart>=0.0.9
